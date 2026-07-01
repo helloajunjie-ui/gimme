@@ -1,0 +1,9 @@
+version: '3'
+
+services:
+  gimme:
+    build: .
+    container_name: gimme
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
