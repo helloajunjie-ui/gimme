@@ -192,11 +192,16 @@ const UI = (() => {
       });
     });
 
-    // --- 取消 ---
+    // --- 取消 / 重新开始 ---
     dom.cancelBtn.addEventListener('click', () => {
       releaseWakeLock();
       App.cleanup();
       showPhase('idle');
+      dom.fileInput.value = '';
+      // 恢复按钮样式
+      dom.cancelBtn.textContent = '取消';
+      dom.cancelBtn.classList.remove('btn-primary');
+      dom.cancelBtn.classList.add('btn-ghost');
     });
 
     // --- 开始传输 ---
@@ -204,12 +209,12 @@ const UI = (() => {
       App.startTransfer();
     });
 
-    // --- 完成按钮 ---
-    dom.doneBtn.addEventListener('click', () => {
+    // --- 完成按钮（默认行为：发送新文件）---
+    dom.doneBtn.onclick = () => {
       App.cleanup();
       showPhase('idle');
       dom.fileInput.value = '';
-    });
+    };
 
     // --- 加入房间 ---
     dom.joinBtn.addEventListener('click', () => {
@@ -220,6 +225,9 @@ const UI = (() => {
         return;
       }
       dom.joinError.classList.add('hidden');
+      // 加入按钮 loading 状态
+      dom.joinBtn.disabled = true;
+      dom.joinBtn.textContent = '加入中...';
       App.joinRoom(code);
     });
 
@@ -265,11 +273,24 @@ const UI = (() => {
     dom.fileName.textContent = file.name;
     dom.fileSize.textContent = formatSize(file.size);
 
-    // 自动复制链接
+    // 自动复制链接（HTTPS 或 localhost 下可用）
     navigator.clipboard.writeText(shareLink).then(() => {
       showToast('分享链接已复制到剪贴板', 'success');
     }).catch(() => {
-      // 手动复制
+      // HTTP 环境下 clipboard API 不可用，引导用户手动复制
+      dom.roomCode.style.cursor = 'pointer';
+      dom.roomCode.title = '点击复制房间链接';
+      dom.roomCode.onclick = () => {
+        navigator.clipboard.writeText(shareLink).catch(() => {
+          // 降级：选中文本让用户手动复制
+          const range = document.createRange();
+          range.selectNodeContents(dom.roomCode);
+          const sel = window.getSelection();
+          sel.removeAllRanges();
+          sel.addRange(range);
+        });
+        showToast('请手动复制房间链接', 'warning');
+      };
     });
   }
 
@@ -283,6 +304,9 @@ const UI = (() => {
     dom.startBtn.classList.add('hidden');
     dom.fileName.textContent = '等待发送方...';
     dom.fileSize.textContent = '';
+    // 恢复加入按钮状态
+    dom.joinBtn.disabled = false;
+    dom.joinBtn.textContent = '加入';
   }
 
   function onPeerJoined() {
@@ -296,6 +320,10 @@ const UI = (() => {
     dom.statusText.textContent = '对方已离开';
     dom.statusDot.className = 'status-dot disconnected';
     dom.startBtn.classList.add('hidden');
+    // 显示"重新开始"按钮，让用户无需刷新即可回到首页
+    dom.cancelBtn.textContent = '重新开始';
+    dom.cancelBtn.classList.remove('btn-ghost');
+    dom.cancelBtn.classList.add('btn-primary');
   }
 
   function onConnectionState(status) {
@@ -410,6 +438,11 @@ const UI = (() => {
     dom.doneTitle.textContent = '传输完成';
     dom.doneAction.textContent = '文件已安全送达对方';
     dom.doneBtn.textContent = '发送新文件';
+    dom.doneBtn.onclick = () => {
+      App.cleanup();
+      showPhase('idle');
+      dom.fileInput.value = '';
+    };
   }
 
   function onReceiveComplete(blob, fileName) {
@@ -420,7 +453,6 @@ const UI = (() => {
     dom.doneAction.textContent = `${fileName} (${formatSize(blob.size)})`;
     dom.doneBtn.textContent = '下载文件';
 
-    // 替换按钮行为
     dom.doneBtn.onclick = () => {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -431,6 +463,7 @@ const UI = (() => {
       setTimeout(() => {
         App.cleanup();
         showPhase('idle');
+        dom.fileInput.value = '';
         dom.doneBtn.onclick = null;
       }, 1000);
     };

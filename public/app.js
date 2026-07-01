@@ -126,7 +126,11 @@ const App = (() => {
 
       case 'peer_disconnected':
         UI?.onPeerDisconnected();
-        cleanup();
+        // 仅关闭 P2P 引擎，保留 WebSocket 连接
+        // 用户可通过"重新开始"按钮手动 cleanup 回到 idle
+        state.engine?.close();
+        state.engine = null;
+        state.phase = 'idle';
         break;
 
       case 'room_expired':
@@ -136,6 +140,17 @@ const App = (() => {
 
       case 'error':
         UI?.showToast?.(msg.message, 'error');
+        // 加入失败时恢复加入按钮状态
+        if (state.phase === 'joining') {
+          // 通过 UI 恢复按钮状态（如果 UI 已挂载）
+          setTimeout(() => {
+            const joinBtn = document.querySelector('#joinBtn');
+            if (joinBtn) {
+              joinBtn.disabled = false;
+              joinBtn.textContent = '加入';
+            }
+          }, 0);
+        }
         break;
 
       case 'pong':
