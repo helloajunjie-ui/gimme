@@ -168,6 +168,10 @@ const P2PEngine = (() => {
     }
 
     _setupDataChannel(channel) {
+      // 防御：如果已有 dataChannel 且不同，关闭旧的防止泄漏
+      if (this.dataChannel && this.dataChannel !== channel) {
+        try { this.dataChannel.close(); } catch {}
+      }
       this.dataChannel = channel;
       channel.binaryType = 'arraybuffer';
 
@@ -391,6 +395,7 @@ const P2PEngine = (() => {
       this.receivedChunks = new Map();
       this.receivedSize = 0;
       this.nextExpectedChunk = 0;
+      this._metaHandled = false; // 防止重复处理
 
       // 创建 OPFS 存储会话
       this.storage = await StorageModule.createSession(this.sessionId);
@@ -410,17 +415,22 @@ const P2PEngine = (() => {
         console.log(`[续传] 从本地加载了 ${savedChunkIds.length} 个分片`);
         // 有缓存 → 续传模式，先触发 resuming 状态（UI 琥珀色进度条）
         this.onStateChange?.('resuming');
-        // 延迟触发 receiving，让用户先看到续传提示
-        setTimeout(() => {
-          this.onStateChange?.('receiving');
-        }, 1500);
 
         // 检查是否所有分片都已缓存（极小文件场景）
         if (this.receivedChunks.size >= this.totalChunks && !this._assembling) {
           console.log('[续传] 所有分片已缓存，直接组装');
+          this._metaHandled = true;
           await this._assembleFile();
           return;
         }
+
+        // 延迟触发 receiving，让用户先看到续传提示
+        // 使用 _metaHandled 标志防止文件完成后仍触发
+        this._resumeTimer = setTimeout(() => {
+          if (!this._metaHandled) {
+            this.onStateChange?.('receiving');
+          }
+        }, 1500);
       } else {
         this.onStateChange?.('receiving');
       }
@@ -474,27 +484,36 @@ const P2PEngine = (() => {
     _handleRetryRequest(chunkId) {
       const startOffset = chunkId * CHUNK_SIZE;
       const endOffset = Math.min(startOffset + CHUNK_SIZE, this.fileSize);
-      if (startOffset < this.fileSize && this.file) {
-        const chunk = this.file.slice(startOffset, endOffset);
-        chunk.arrayBuffer().then(async (buf) => {
-          const encrypted = await CryptoModule.encryptChunk(buf, this.cryptoKey);
-          const header = new ArrayBuffer(4);
-          const headerView = new DataView(header);
-          headerView.setUint32(0, chunkId, true);
-          const packet = new Uint8Array(header.byteLength + encrypted.byteLength);
-          packet.set(new Uint8Array(header), 0);
-          packet.set(new Uint8Array(encrypted), header.byteLength);
-          try {
-            this.dataChannel.send(packet.buffer);
-          } catch (e) {
-            console.error('[重传] 发送分片失败:', e.message);
-            this.onError?.(new Error(`分片 ${chunkId} 重传发送失败: ${e.message}`));
-          }
-        }).catch(err => {
-          console.error('[重传] 读取文件分片失败:', err.message);
-          this.onError?.(new Error(`分片 ${chunkId} 重传失败: ${err.message}`));
-        });
+      // 防御：验证分片范围有效且文件存在
+      if (!this.file || startOffset >= this.fileSize) {
+        console.warn(`[重传] 无效的分片请求: chunkId=${chunkId}, fileSize=${this.fileSize}`);
+        return;
       }
+      const chunk = this.file.slice(startOffset, endOffset);
+      // 防御：空 Blob 不处理
+      if (chunk.size === 0) {
+        console.warn(`[重传] 空分片: chunkId=${chunkId}`);
+        return;
+      }
+      chunk.arrayBuffer().then(async (buf) => {
+        if (buf.byteLength === 0) return;
+        const encrypted = await CryptoModule.encryptChunk(buf, this.cryptoKey);
+        const header = new ArrayBuffer(4);
+        const headerView = new DataView(header);
+        headerView.setUint32(0, chunkId, true);
+        const packet = new Uint8Array(header.byteLength + encrypted.byteLength);
+        packet.set(new Uint8Array(header), 0);
+        packet.set(new Uint8Array(encrypted), header.byteLength);
+        try {
+          this.dataChannel.send(packet.buffer);
+        } catch (e) {
+          console.error('[重传] 发送分片失败:', e.message);
+          this.onError?.(new Error(`分片 ${chunkId} 重传发送失败: ${e.message}`));
+        }
+      }).catch(err => {
+        console.error('[重传] 读取文件分片失败:', err.message);
+        this.onError?.(new Error(`分片 ${chunkId} 重传失败: ${err.message}`));
+      });
     }
 
     // --- 信令 ---
@@ -543,6 +562,11 @@ const P2PEngine = (() => {
 
     async close() {
       this.sending = false;
+      this._metaHandled = true; // 阻止 _resumeTimer 回调
+      if (this._resumeTimer) {
+        clearTimeout(this._resumeTimer);
+        this._resumeTimer = null;
+      }
       this.dataChannel?.close();
       this.peerConnection?.close();
       this.connected = false;

@@ -453,19 +453,29 @@ const UI = (() => {
     dom.doneAction.textContent = `${fileName} (${formatSize(blob.size)})`;
     dom.doneBtn.textContent = '下载文件';
 
+    // 缓存 blob URL，避免每次点击重新创建
+    let blobUrl = null;
+
     dom.doneBtn.onclick = () => {
-      const url = URL.createObjectURL(blob);
+      if (!blobUrl) {
+        blobUrl = URL.createObjectURL(blob);
+      }
       const a = document.createElement('a');
-      a.href = url;
+      a.href = blobUrl;
       a.download = fileName;
       a.click();
-      URL.revokeObjectURL(url);
+      // 延迟 revoke，确保浏览器已开始下载
+      // 某些浏览器中 click() 触发的下载是异步的
       setTimeout(() => {
+        if (blobUrl) {
+          URL.revokeObjectURL(blobUrl);
+          blobUrl = null;
+        }
         App.cleanup();
         showPhase('idle');
         dom.fileInput.value = '';
         dom.doneBtn.onclick = null;
-      }, 1000);
+      }, 5000); // 5秒后清理，给浏览器足够时间启动下载
     };
   }
 

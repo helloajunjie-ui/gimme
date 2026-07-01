@@ -118,10 +118,8 @@ const App = (() => {
         break;
 
       case 'signal':
-        // 转发给 P2P 引擎
-        if (state.engine) {
-          state.engine._handleSignal(msg.signal);
-        }
+        // 引擎内部已通过 onSignal 回调处理信令
+        // 这里不再重复转发，避免 _handleSignal 被调用两次
         break;
 
       case 'peer_disconnected':
