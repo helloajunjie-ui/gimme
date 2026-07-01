@@ -42,7 +42,8 @@ const App = (() => {
 
   // --- 指数退避重连 ---
   function scheduleReconnect() {
-    if (state.phase === 'done' || state.phase === 'idle') return;
+    // disconnected 阶段（对方离开）不自动重连，等待用户手动操作
+    if (state.phase === 'done' || state.phase === 'idle' || state.phase === 'disconnected') return;
     const delay = Math.min(1000 * Math.pow(2, state.reconnectAttempts), state.maxReconnectDelay);
     state.reconnectAttempts++;
     console.log(`[WS] ${delay}ms 后尝试第 ${state.reconnectAttempts} 次重连...`);
@@ -128,7 +129,10 @@ const App = (() => {
         // 用户可通过"重新开始"按钮手动 cleanup 回到 idle
         state.engine?.close();
         state.engine = null;
-        state.phase = 'idle';
+        // 不改变 phase 为 idle，保持 UI 在 active 状态
+        // 让用户看到"对方已离开"和"重新开始"按钮
+        // 如果设为 idle，scheduleReconnect 会跳过重连检查
+        state.phase = 'disconnected';
         break;
 
       case 'room_expired':
@@ -345,6 +349,7 @@ const App = (() => {
     state.cryptoKey = null;
     state.rawKey = null;
     state.fileHash = null;
+    state.keyReady = null;  // 重置密钥就绪信号，防止旧 Promise 污染下次传输
     state.reconnectAttempts = 0;
   }
 

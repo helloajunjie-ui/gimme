@@ -231,7 +231,10 @@ const P2PEngine = (() => {
           this.offset = syncMsg.receivedOffset;
           this.resumeMode = true;
           console.log(`[续传] 从 offset ${this.offset} 继续发送`);
+          // 续传模式：触发 resuming 后延迟再触发 connected
+          // 让 UI 有足够时间展示琥珀色进度条
           this.onStateChange?.('resuming');
+          await new Promise(resolve => setTimeout(resolve, 800));
         }
       } catch {
         console.log('[续传] 无缓存状态，从头开始传输');
@@ -345,8 +348,14 @@ const P2PEngine = (() => {
     async _handleMessage(data) {
       // JSON 消息
       if (data instanceof ArrayBuffer === false) {
+        let msg;
         try {
-          const msg = JSON.parse(data);
+          msg = JSON.parse(data);
+        } catch {
+          console.warn('[P2P] 收到无效 JSON 消息:', data);
+          return;
+        }
+        try {
           switch (msg.type) {
             case 'meta':
               await this._handleMeta(msg);
@@ -357,8 +366,13 @@ const P2PEngine = (() => {
             case 'retry_request':
               this._handleRetryRequest(msg.chunkId);
               break;
+            default:
+              console.warn('[P2P] 未知消息类型:', msg.type);
           }
-        } catch {}
+        } catch (err) {
+          console.error('[P2P] 处理消息异常:', err.message);
+          this.onError?.(new Error(`消息处理失败: ${err.message}`));
+        }
         return;
       }
 
