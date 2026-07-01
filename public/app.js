@@ -21,7 +21,8 @@ const App = (() => {
     wsConnected: false,
     reconnectAttempts: 0,
     maxReconnectDelay: 30000,  // 最大重连间隔 30s
-    keyReady: null        // Promise，密钥生成完成信号
+    keyReady: null,       // Promise，密钥生成完成信号
+    reconnectTimer: null  // 重连定时器引用
   };
 
   // --- 依赖注入 UI ---
@@ -41,12 +42,12 @@ const App = (() => {
 
   // --- 指数退避重连 ---
   function scheduleReconnect() {
-    if (state.phase === 'done') return;
+    if (state.phase === 'done' || state.phase === 'idle') return;
     const delay = Math.min(1000 * Math.pow(2, state.reconnectAttempts), state.maxReconnectDelay);
     state.reconnectAttempts++;
     console.log(`[WS] ${delay}ms 后尝试第 ${state.reconnectAttempts} 次重连...`);
     UI?.onConnectionState?.('reconnecting');
-    setTimeout(() => {
+    state.reconnectTimer = setTimeout(() => {
       connectWebSocket();
     }, delay);
   }
@@ -311,6 +312,19 @@ const App = (() => {
   function cleanup() {
     state.engine?.close();
     state.engine = null;
+    // 取消待执行的重连定时器
+    if (state.reconnectTimer) {
+      clearTimeout(state.reconnectTimer);
+      state.reconnectTimer = null;
+    }
+    // 关闭 WebSocket 连接
+    state.wsConnected = false;
+    if (state.ws) {
+      state.ws.onclose = null;  // 阻止触发重连
+      state.ws.onerror = null;
+      state.ws.close();
+      state.ws = null;
+    }
     state.phase = 'idle';
     state.role = null;
     state.roomId = null;
@@ -318,6 +332,7 @@ const App = (() => {
     state.cryptoKey = null;
     state.rawKey = null;
     state.fileHash = null;
+    state.reconnectAttempts = 0;
   }
 
   function init() {
@@ -331,14 +346,20 @@ const App = (() => {
       const keyStr = parts[1];
       if (roomId) {
         // 预导入解密密钥（接收方使用）
-        if (keyStr) {
-          CryptoModule.importKey(keyStr).then(key => {
-            state.cryptoKey = key;
-          }).catch(err => {
-            console.error('[KEY] 密钥导入失败:', err);
-          });
-        }
-        UI?.onHashDetected(roomId);
+        // 必须等待密钥导入完成再触发 joinRoom，否则 initReceiverEngine
+        // 执行时 state.cryptoKey 可能还是 null
+        const keyPromise = keyStr
+          ? CryptoModule.importKey(keyStr).then(key => {
+              state.cryptoKey = key;
+            }).catch(err => {
+              console.error('[KEY] 密钥导入失败:', err);
+              UI?.showToast?.('解密密钥无效，请检查链接', 'error');
+            })
+          : Promise.resolve();
+        // 等待密钥就绪后再自动加入房间
+        keyPromise.then(() => {
+          UI?.onHashDetected(roomId);
+        });
       }
     }
   }

@@ -227,6 +227,11 @@ wss.on('connection', (ws) => {
 
       case 'signal': {
         const { to, signal } = msg;
+        // 验证发送方仍在有效房间中，防止断开连接后的残留消息转发
+        const sender = clients.get(clientId);
+        if (!sender || !sender.roomId || !rooms.has(sender.roomId)) {
+          return;
+        }
         const target = clients.get(to);
         if (target?.ws.readyState === 1) {
           target.ws.send(JSON.stringify({
