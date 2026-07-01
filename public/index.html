@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="description" content="gimme — 零信任端到端加密文件传输。无需注册，阅后即焚。">
+  <meta name="theme-color" content="#0a0a0f">
+  <title>gimme · 零信任文件传输</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <!-- 背景装饰 -->
+    <div class="bg-grid"></div>
+    <div class="bg-glow"></div>
+
+    <!-- Header -->
+    <header class="header">
+      <div class="logo">
+        <span class="logo-icon">◈</span>
+        <span class="logo-text">gimme</span>
+      </div>
+      <span class="tagline">零信任 · 端到端加密</span>
+    </header>
+
+    <!-- ============ 空闲状态 ============ -->
+    <div id="phaseIdle" class="phase">
+      <div class="hero">
+        <!-- 拖拽上传区 -->
+        <div id="dropZone" class="drop-zone">
+          <div id="dropOverlay" class="drop-overlay">
+            <span class="drop-text">释放文件</span>
+          </div>
+          <div class="drop-content">
+            <div id="uploadIcon" class="upload-icon">
+              <svg width="64" height="64" viewBox="0 0 64 64" fill="none">
+                <path d="M32 44V20M32 20L22 30M32 20L42 30" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+                <rect x="8" y="8" width="48" height="48" rx="12" stroke="currentColor" stroke-width="1.5" stroke-opacity="0.3"/>
+              </svg>
+            </div>
+            <p class="drop-title">拖拽文件到此处</p>
+            <p class="drop-subtitle">或点击选择文件 · 端到端加密传输</p>
+            <p class="drop-hint">文件仅在你的浏览器中加密，服务器无法读取</p>
+          </div>
+          <input id="fileInput" type="file" hidden>
+        </div>
+
+        <!-- 加入房间 -->
+        <div class="join-section">
+          <div class="divider">
+            <span class="divider-text">或加入已有房间</span>
+          </div>
+          <div class="join-input-group">
+            <input id="joinInput" type="text" class="join-input" placeholder="输入房间号" maxlength="6" autocomplete="off">
+            <button id="joinBtn" class="btn btn-secondary">加入</button>
+          </div>
+          <p id="joinError" class="join-error hidden">请输入有效的房间号</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ 活跃状态 ============ -->
+    <div id="phaseActive" class="phase hidden">
+      <div class="transfer-panel">
+        <!-- 房间号展示 -->
+        <div id="roomDisplay" class="room-display">
+          <div class="room-label">房间号</div>
+          <div class="room-code-wrapper">
+            <span id="roomCode" class="room-code">------</span>
+            <button id="copyBtn" class="btn-icon" title="复制房间号">
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                <rect x="4" y="4" width="12" height="12" rx="2" stroke="currentColor" stroke-width="1.5"/>
+                <path d="M7 4V3a1 1 0 011-1h8a1 1 0 011 1v8a1 1 0 01-1 1h-1" stroke="currentColor" stroke-width="1.5"/>
+              </svg>
+              <span id="copyTooltip" class="tooltip">已复制</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- 连接状态 -->
+        <div id="statusIndicator" class="status-indicator">
+          <span id="statusDot" class="status-dot idle"></span>
+          <span id="statusText" class="status-text">初始化中...</span>
+        </div>
+
+        <!-- 文件信息 -->
+        <div class="file-info">
+          <div class="file-icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+              <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M14 2v6h6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </div>
+          <div class="file-details">
+            <span id="fileName" class="file-name">---</span>
+            <span id="fileSize" class="file-size">---</span>
+          </div>
+          <div id="lockIcon" class="lock-icon">
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+              <rect x="4" y="8" width="12" height="10" rx="2" stroke="currentColor" stroke-width="1.5"/>
+              <path d="M7 8V6a3 3 0 016 0v2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            </svg>
+          </div>
+        </div>
+
+        <!-- Wake Lock 警告（手机端防锁屏） -->
+        <div id="wakeLockWarning" class="wake-lock-warning hidden">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+            <circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.5"/>
+            <path d="M8 5v3M8 11h.01" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+          <span>传输期间请勿切换应用或锁屏，否则将前功尽弃</span>
+        </div>
+
+        <!-- 进度条 -->
+        <div id="progressContainer" class="progress-container hidden">
+          <div class="progress-bar-track">
+            <div id="progressBar" class="progress-bar-fill" style="width: 0%"></div>
+          </div>
+          <div class="progress-info">
+            <span id="progressText" class="progress-text">0 B / 0 B</span>
+            <span id="speedText" class="speed-text">--/s</span>
+          </div>
+        </div>
+
+        <!-- 操作按钮 -->
+        <div class="actions">
+          <button id="cancelBtn" class="btn btn-ghost">取消</button>
+          <button id="startBtn" class="btn btn-primary hidden">开始传输</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ 完成状态 ============ -->
+    <div id="phaseDone" class="phase hidden">
+      <div class="done-panel">
+        <div id="doneIcon" class="done-icon">✓</div>
+        <h2 id="doneTitle" class="done-title">传输完成</h2>
+        <p id="doneAction" class="done-action">文件已安全送达</p>
+        <button id="doneBtn" class="btn btn-primary">发送新文件</button>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="footer">
+      <span>数据仅存在于浏览器内存中 · 关闭即焚</span>
+      <span class="footer-sep">·</span>
+      <span>开源 · 零信任架构</span>
+    </footer>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast" class="toast">
+    <span id="toastMessage"></span>
+  </div>
+
+  <!-- Scripts -->
+  <script src="crypto.js"></script>
+  <script src="hash.js"></script>
+  <script src="storage.js"></script>
+  <script src="webrtc.js"></script>
+  <script src="app.js"></script>
+  <script src="ui.js"></script>
+</body>
+</html>
