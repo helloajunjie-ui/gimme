@@ -240,14 +240,21 @@ const App = (() => {
       sendSignalingMessage({ type: 'signal', to: peerId, signal });
     });
 
-    // 从 URL Hash 中提取密钥
-    const hash = location.hash.slice(1);
-    const parts = hash.split('|');
-    if (parts.length >= 2) {
-      const keyStr = parts[1];
-      CryptoModule.importKey(keyStr).then(key => {
-        state.engine.decryptKey = key;
-      });
+    // 使用 init() 中预导入的密钥
+    if (state.cryptoKey) {
+      state.engine.decryptKey = state.cryptoKey;
+    } else {
+      // 兜底：从 URL Hash 中提取密钥
+      const hash = location.hash.slice(1);
+      const parts = hash.split('|');
+      if (parts.length >= 2) {
+        const keyStr = parts[1];
+        CryptoModule.importKey(keyStr).then(key => {
+          state.engine.decryptKey = key;
+        }).catch(err => {
+          console.error('[KEY] 接收端密钥导入失败:', err);
+        });
+      }
     }
   }
 
@@ -311,10 +318,21 @@ const App = (() => {
   function init() {
     connectWebSocket();
     // 检查 URL 是否包含房间信息
+    // 格式: #ROOMID|BASE64_KEY
     const hash = location.hash.slice(1);
     if (hash && hash.includes('|')) {
-      const roomId = hash.split('|')[0];
+      const parts = hash.split('|');
+      const roomId = parts[0];
+      const keyStr = parts[1];
       if (roomId) {
+        // 预导入解密密钥（接收方使用）
+        if (keyStr) {
+          CryptoModule.importKey(keyStr).then(key => {
+            state.cryptoKey = key;
+          }).catch(err => {
+            console.error('[KEY] 密钥导入失败:', err);
+          });
+        }
         UI?.onHashDetected(roomId);
       }
     }
