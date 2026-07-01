@@ -8,6 +8,7 @@
  * - /api/nodes 返回 HMAC 时效凭证（防盗刷）
  *
  * 架构：HTTP (静态文件 + JSON API) + WebSocket (信令)
+ * SSL：建议用 Nginx 反代处理，见 README.md
  */
 
 const http = require('http');
