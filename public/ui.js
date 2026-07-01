@@ -301,10 +301,14 @@ const UI = (() => {
   function onConnectionState(status) {
     switch (status) {
       case 'connected':
-        // 传输中收到 connected = 续传完成，恢复进度条颜色
-        if (currentPhase === 'transferring') {
+        // 传输中收到 connected：仅在续传模式下恢复进度条
+        if (currentPhase === 'transferring' && dom.progressBar.classList.contains('resuming')) {
           dom.progressBar.classList.remove('resuming');
           dom.statusText.textContent = '隧道已重连，继续安全传输';
+        } else if (currentPhase === 'transferring') {
+          // 普通 ICE 抖动，不改变状态文本
+          dom.statusDot.className = 'status-dot connected';
+          return;
         } else {
           dom.statusText.textContent = 'P2P 通道已建立 ✓';
         }

@@ -414,6 +414,13 @@ const P2PEngine = (() => {
         setTimeout(() => {
           this.onStateChange?.('receiving');
         }, 1500);
+
+        // 检查是否所有分片都已缓存（极小文件场景）
+        if (this.receivedChunks.size >= this.totalChunks && !this._assembling) {
+          console.log('[续传] 所有分片已缓存，直接组装');
+          await this._assembleFile();
+          return;
+        }
       } else {
         this.onStateChange?.('receiving');
       }
@@ -477,7 +484,12 @@ const P2PEngine = (() => {
           const packet = new Uint8Array(header.byteLength + encrypted.byteLength);
           packet.set(new Uint8Array(header), 0);
           packet.set(new Uint8Array(encrypted), header.byteLength);
-          this.dataChannel.send(packet.buffer);
+          try {
+            this.dataChannel.send(packet.buffer);
+          } catch (e) {
+            console.error('[重传] 发送分片失败:', e.message);
+            this.onError?.(new Error(`分片 ${chunkId} 重传发送失败: ${e.message}`));
+          }
         }).catch(err => {
           console.error('[重传] 读取文件分片失败:', err.message);
           this.onError?.(new Error(`分片 ${chunkId} 重传失败: ${err.message}`));
