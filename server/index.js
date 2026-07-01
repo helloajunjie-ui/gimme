@@ -149,12 +149,14 @@ setInterval(() => {
   const now = Date.now();
   for (const [roomId, room] of rooms.entries()) {
     if (now - room.createdAt > ROOM_EXPIRE_MS) {
-      for (const client of [room.creator, room.joiner].filter(Boolean)) {
-        const clientData = clients.get(client);
+      for (const clientId of [room.creator, room.joiner].filter(Boolean)) {
+        const clientData = clients.get(clientId);
         if (clientData?.ws.readyState === 1) {
           clientData.ws.send(JSON.stringify({ type: 'room_expired', roomId }));
-          clientData.ws.close();
         }
+        // 先清理 clients Map，避免 close 事件触发后其他逻辑拿到 stale 引用
+        clients.delete(clientId);
+        clientData?.ws.close();
       }
       rooms.delete(roomId);
       console.log(`[过期] 房间 ${roomId} 已清理`);

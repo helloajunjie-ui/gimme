@@ -129,12 +129,12 @@ const App = (() => {
         break;
 
       case 'room_expired':
-        UI?.showError('房间已过期（10分钟限制）');
+        UI?.showToast?.('房间已过期（10分钟限制）', 'error');
         cleanup();
         break;
 
       case 'error':
-        UI?.showError(msg.message);
+        UI?.showToast?.(msg.message, 'error');
         break;
 
       case 'pong':

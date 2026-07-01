@@ -292,7 +292,7 @@ const P2PEngine = (() => {
 
     // ==================== 发送逻辑 ====================
 
-    async _sendNextChunk() {
+    async _sendNextChunk(retryCount = 0) {
       if (!this.sending || this.offset >= this.fileSize) {
         if (this.offset >= this.fileSize) {
           this.sending = false;
@@ -318,10 +318,15 @@ const P2PEngine = (() => {
       try {
         this.dataChannel.send(packet.buffer);
       } catch (e) {
+        if (retryCount >= 3) {
+          this.onError?.(new Error('发送失败，已达最大重试次数'));
+          this.sending = false;
+          return;
+        }
         await new Promise(resolve => {
           this.dataChannel.onbufferedamountlow = resolve;
         });
-        this._sendNextChunk();
+        this._sendNextChunk(retryCount + 1);
         return;
       }
 
@@ -405,9 +410,13 @@ const P2PEngine = (() => {
         console.log(`[续传] 从本地加载了 ${savedChunkIds.length} 个分片`);
         // 有缓存 → 续传模式，先触发 resuming 状态（UI 琥珀色进度条）
         this.onStateChange?.('resuming');
+        // 延迟触发 receiving，让用户先看到续传提示
+        setTimeout(() => {
+          this.onStateChange?.('receiving');
+        }, 1500);
+      } else {
+        this.onStateChange?.('receiving');
       }
-
-      this.onStateChange?.('receiving');
 
       // 发送 SYNC_STATE 给发送端
       this._sendSyncState();
@@ -469,6 +478,9 @@ const P2PEngine = (() => {
           packet.set(new Uint8Array(header), 0);
           packet.set(new Uint8Array(encrypted), header.byteLength);
           this.dataChannel.send(packet.buffer);
+        }).catch(err => {
+          console.error('[重传] 读取文件分片失败:', err.message);
+          this.onError?.(new Error(`分片 ${chunkId} 重传失败: ${err.message}`));
         });
       }
     }
