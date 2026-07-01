@@ -313,6 +313,7 @@ const App = (() => {
     state.file = null;
     state.cryptoKey = null;
     state.rawKey = null;
+    state.fileHash = null;
   }
 
   function init() {

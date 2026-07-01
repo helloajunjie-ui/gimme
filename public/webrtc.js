@@ -90,6 +90,7 @@ const P2PEngine = (() => {
       this.nextExpectedChunk = 0;
       this.storage = null;        // OPFS 存储会话
       this.sessionId = '';        // 文件哈希作为会话 ID
+      this._assembling = false;   // 正在组装中，防止并发
 
       // 断点续传状态
       this.resumeMode = false;    // 是否处于续传模式
@@ -173,11 +174,6 @@ const P2PEngine = (() => {
       channel.onopen = () => {
         this.connected = true;
         this.onStateChange?.('connected');
-
-        // 接收端：DataChannel 打开后，发送 SYNC_STATE 进行断点续传握手
-        if (this.role === 'receiver' && this.sessionId) {
-          this._sendSyncState();
-        }
       };
 
       channel.onclose = () => {
@@ -218,13 +214,15 @@ const P2PEngine = (() => {
 
       // 等待接收端的 SYNC_STATE（如果有本地缓存则续传）
       // 设置超时：如果 3 秒内没有收到 SYNC_STATE，从头开始传
-      const syncTimeout = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('timeout')), 3000)
-      );
+      let syncTimer = null;
       const syncPromise = new Promise(resolve => { this.syncResolve = resolve; });
+      const syncTimeout = new Promise(resolve => {
+        syncTimer = setTimeout(() => resolve(null), 3000);
+      });
 
       try {
         const syncMsg = await Promise.race([syncPromise, syncTimeout]);
+        clearTimeout(syncTimer);
         if (syncMsg && syncMsg.receivedOffset > 0) {
           this.offset = syncMsg.receivedOffset;
           this.resumeMode = true;
@@ -232,7 +230,6 @@ const P2PEngine = (() => {
           this.onStateChange?.('resuming');
         }
       } catch {
-        // 超时或没有缓存，从头开始
         console.log('[续传] 无缓存状态，从头开始传输');
       }
 
@@ -376,7 +373,8 @@ const P2PEngine = (() => {
         }
       }
 
-      if (this.receivedChunks.size >= this.totalChunks) {
+      // 所有分片收齐后组装（避免重试场景下重复触发）
+      if (this.receivedChunks.size >= this.totalChunks && !this._assembling) {
         await this._assembleFile();
       }
     }
@@ -416,12 +414,16 @@ const P2PEngine = (() => {
     }
 
     async _assembleFile() {
+      if (this._assembling) return;
+      this._assembling = true;
       this.onStateChange?.('assembling');
       const chunks = [];
       for (let i = 0; i < this.totalChunks; i++) {
         const encrypted = this.receivedChunks.get(i);
         if (!encrypted) {
+          // 缺失分片，请求重传后等待下次触发
           this._requestRetry(i);
+          this._assembling = false;
           return;
         }
         const decrypted = await CryptoModule.decryptChunk(encrypted, this.decryptKey);
@@ -443,6 +445,7 @@ const P2PEngine = (() => {
         await this.storage.clear();
       }
 
+      this._assembling = false;
       this.onComplete?.(blob, this.metadata.name);
     }
 
