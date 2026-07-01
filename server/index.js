@@ -94,9 +94,12 @@ const httpServer = http.createServer((req, res) => {
       { urls: 'stun:stun2.l.google.com:19302' },
     ];
 
-    // 动态生成有时效的 TURN 凭证
-    for (const relay of TURN_CONFIG.relays) {
-      nodes.push(generateTurnCredentials(relay.domain, relay.realm));
+    // 仅当用户配置了自定义 TURN secret 时才返回 TURN 节点
+    // 默认值 'change_this_to_your_turn_secret' 会生成无效凭证，导致 ICE 超时
+    if (TURN_CONFIG.secret && TURN_CONFIG.secret !== 'change_this_to_your_turn_secret') {
+      for (const relay of TURN_CONFIG.relays) {
+        nodes.push(generateTurnCredentials(relay.domain, relay.realm));
+      }
     }
 
     res.end(JSON.stringify(nodes));
@@ -206,14 +209,17 @@ wss.on('connection', (ws) => {
         if (room.joiner) {
           return ws.send(JSON.stringify({ type: 'error', message: '房间已满' }));
         }
+        // 验证创建者是否在线
+        const creator = clients.get(room.creator);
+        if (!creator || creator.ws.readyState !== 1) {
+          rooms.delete(roomId);
+          return ws.send(JSON.stringify({ type: 'error', message: '创建者已离线，房间已关闭' }));
+        }
         room.joiner = clientId;
         client.roomId = roomId;
         client.role = 'joiner';
 
-        const creator = clients.get(room.creator);
-        if (creator?.ws.readyState === 1) {
-          creator.ws.send(JSON.stringify({ type: 'peer_joined', peerId: clientId }));
-        }
+        creator.ws.send(JSON.stringify({ type: 'peer_joined', peerId: clientId }));
         ws.send(JSON.stringify({ type: 'room_joined', roomId, peerId: room.creator }));
         console.log(`[房间] ${clientId} 加入房间 ${roomId}`);
         break;

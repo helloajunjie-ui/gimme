@@ -253,7 +253,11 @@ const App = (() => {
           state.engine.decryptKey = key;
         }).catch(err => {
           console.error('[KEY] 接收端密钥导入失败:', err);
+          UI?.showToast?.('解密密钥无效，请检查链接是否正确', 'error');
         });
+      } else {
+        console.error('[KEY] URL Hash 格式错误，缺少密钥');
+        UI?.showToast?.('链接格式错误，无法获取解密密钥', 'error');
       }
     }
   }
