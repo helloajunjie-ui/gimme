@@ -330,10 +330,15 @@ const P2PEngine = (() => {
           this.sending = false;
           return;
         }
+        // 等待缓冲区清空后重试
         await new Promise(resolve => {
-          this.dataChannel.onbufferedamountlow = resolve;
+          const handler = () => {
+            this.dataChannel.onbufferedamountlow = null;
+            resolve();
+          };
+          this.dataChannel.onbufferedamountlow = handler;
         });
-        this._sendNextChunk(retryCount + 1);
+        await this._sendNextChunk(retryCount + 1);
         return;
       }
 
@@ -414,6 +419,9 @@ const P2PEngine = (() => {
       // 创建 OPFS 存储会话
       this.storage = await StorageModule.createSession(this.sessionId);
 
+      // 启动重传监控（防御：防止重传丢失导致死等）
+      this._startRetryWatcher();
+
       // 检查是否有本地缓存
       const savedChunkIds = await this.storage.getSavedChunkIds();
       if (savedChunkIds.length > 0) {
@@ -438,19 +446,20 @@ const P2PEngine = (() => {
           return;
         }
 
-        // 延迟触发 receiving，让用户先看到续传提示
+        // 延迟触发 receiving + 发送 SYNC_STATE，让用户先看到续传提示
+        // 确保状态顺序：resuming → receiving → 数据到达
         // 使用 _metaHandled 标志防止文件完成后仍触发
         this._resumeTimer = setTimeout(() => {
           if (!this._metaHandled) {
             this.onStateChange?.('receiving');
+            this._sendSyncState();
           }
         }, 1500);
       } else {
         this.onStateChange?.('receiving');
+        // 无缓存：立即发送 SYNC_STATE（offset=0，发送端从头开始）
+        this._sendSyncState();
       }
-
-      // 发送 SYNC_STATE 给发送端
-      this._sendSyncState();
     }
 
     async _assembleFile() {
@@ -480,6 +489,9 @@ const P2PEngine = (() => {
 
       const blob = new Blob([merged], { type: this.metadata.mimeType });
 
+      // 停止重传监控
+      this._stopRetryWatcher();
+
       // 清理 OPFS 缓存
       if (this.storage) {
         await this.storage.clear();
@@ -491,7 +503,36 @@ const P2PEngine = (() => {
 
     _requestRetry(chunkId) {
       if (this.dataChannel?.readyState === 'open') {
-        this.dataChannel.send(JSON.stringify({ type: 'retry_request', chunkId }));
+        try {
+          this.dataChannel.send(JSON.stringify({ type: 'retry_request', chunkId }));
+        } catch (e) {
+          console.warn(`[重传] 发送重传请求失败: chunkId=${chunkId}`, e.message);
+        }
+      }
+    }
+
+    /**
+     * 定期检查缺失分片并请求重传（防御：防止重传丢失导致死等）
+     */
+    _startRetryWatcher() {
+      if (this._retryTimer) return;
+      this._retryTimer = setInterval(() => {
+        if (!this.metadata || this._assembling) return;
+        // 检查前 64 个连续 chunk 是否有缺失
+        const start = Math.max(0, this.nextExpectedChunk - 32);
+        const end = Math.min(this.totalChunks, start + 64);
+        for (let i = start; i < end; i++) {
+          if (!this.receivedChunks.has(i)) {
+            this._requestRetry(i);
+          }
+        }
+      }, 5000); // 每 5 秒检查一次
+    }
+
+    _stopRetryWatcher() {
+      if (this._retryTimer) {
+        clearInterval(this._retryTimer);
+        this._retryTimer = null;
       }
     }
 
@@ -581,6 +622,7 @@ const P2PEngine = (() => {
         clearTimeout(this._resumeTimer);
         this._resumeTimer = null;
       }
+      this._stopRetryWatcher(); // 停止重传监控
       this.dataChannel?.close();
       this.peerConnection?.close();
       this.connected = false;

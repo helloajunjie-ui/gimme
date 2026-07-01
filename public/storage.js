@@ -38,11 +38,17 @@ const StorageModule = (() => {
      * @param {ArrayBuffer} data
      */
     async function saveChunk(chunkId, data) {
-      const fileName = `${chunkId}`;
-      const fileHandle = await sessionDir.getFileHandle(fileName, { create: true });
-      const writable = await fileHandle.createWritable();
-      await writable.write(data);
-      await writable.close();
+      try {
+        const fileName = `${chunkId}`;
+        const fileHandle = await sessionDir.getFileHandle(fileName, { create: true });
+        const writable = await fileHandle.createWritable();
+        await writable.write(data);
+        await writable.close();
+      } catch (e) {
+        // 并发写入或 OPFS 配额不足时静默降级
+        // 数据仍在内存中（receivedChunks），不影响传输完整性
+        console.warn(`[Storage] 保存分片 ${chunkId} 失败:`, e.message);
+      }
     }
 
     /**

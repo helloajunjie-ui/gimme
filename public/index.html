@@ -83,6 +83,15 @@
           <span id="statusText" class="status-text">初始化中...</span>
         </div>
 
+        <!-- TURN 中继指示器 -->
+        <div id="relayIndicator" class="relay-indicator hidden">
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+            <circle cx="6" cy="6" r="5" stroke="currentColor" stroke-width="1.2"/>
+            <path d="M6 3v3l2 1.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+          </svg>
+          <span>中继转发中 · 数据仍为端到端加密</span>
+        </div>
+
         <!-- 文件信息 -->
         <div class="file-info">
           <div class="file-icon">

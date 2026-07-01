@@ -55,6 +55,7 @@ const UI = (() => {
       cancelBtn: $('#cancelBtn'),
       startBtn: $('#startBtn'),
       wakeLockWarning: $('#wakeLockWarning'),
+      relayIndicator: $('#relayIndicator'),
 
       // 完成状态
       doneIcon: $('#doneIcon'),
@@ -369,6 +370,15 @@ const UI = (() => {
         dom.statusText.textContent = '信令连接断开，正在重连...';
         dom.statusDot.className = 'status-dot disconnected';
         break;
+      case 'relay_active':
+        // TURN 中继转发中 — 显示持久指示器
+        dom.relayIndicator?.classList.remove('hidden');
+        break;
+      case 'relay_fallback':
+        // P2P 直连失败，尝试中继
+        dom.statusText.textContent = 'P2P 直连失败，尝试中继转发...';
+        dom.statusDot.className = 'status-dot warning';
+        break;
     }
   }
 
@@ -381,6 +391,7 @@ const UI = (() => {
     dom.progressContainer.classList.remove('hidden');
     transferStartTime = Date.now();
     lastBytes = 0;
+    currentPhase = 'transferring';  // 同步 phase，确保 ICE 抖动时 connected 状态正确处理
     // 激活屏幕常亮（防止手机锁屏断连）
     requestWakeLock();
   }

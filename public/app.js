@@ -22,7 +22,8 @@ const App = (() => {
     reconnectAttempts: 0,
     maxReconnectDelay: 30000,  // 最大重连间隔 30s
     keyReady: null,       // Promise，密钥生成完成信号
-    reconnectTimer: null  // 重连定时器引用
+    reconnectTimer: null,  // 重连定时器引用
+    _pendingMessages: []   // WebSocket 未就绪时缓存的消息
   };
 
   // --- 依赖注入 UI ---
@@ -31,13 +32,28 @@ const App = (() => {
     UI = uiModule;
   }
 
-  // --- 信令消息发送（带状态防御）---
+  // --- 信令消息发送（带消息队列）---
   function sendSignalingMessage(msg) {
-    if (!state.wsConnected || !state.ws || state.ws.readyState !== WebSocket.OPEN) {
-      console.warn('[WS] 信令通道未就绪，消息已丢弃:', msg.type || msg);
-      return;
+    if (state.wsConnected && state.ws?.readyState === WebSocket.OPEN) {
+      state.ws.send(JSON.stringify(msg));
+    } else {
+      // WebSocket 未就绪，缓存消息等待连接建立后发送
+      console.log('[WS] 信令通道未就绪，消息已缓存:', msg.type || msg);
+      state._pendingMessages.push(msg);
     }
-    state.ws.send(JSON.stringify(msg));
+  }
+
+  // --- 发送所有缓存的消息 ---
+  function flushPendingMessages() {
+    const pending = state._pendingMessages;
+    state._pendingMessages = [];
+    for (const msg of pending) {
+      try {
+        state.ws?.send(JSON.stringify(msg));
+      } catch (e) {
+        console.warn('[WS] 缓存消息发送失败:', msg.type, e.message);
+      }
+    }
   }
 
   // --- 指数退避重连 ---
@@ -63,6 +79,8 @@ const App = (() => {
       console.log('[WS] 信令连接已建立');
       state.wsConnected = true;
       state.reconnectAttempts = 0;
+      // 发送连接建立前缓存的消息（如 create_room）
+      flushPendingMessages();
     };
 
     state.ws.onmessage = (e) => {
@@ -351,6 +369,7 @@ const App = (() => {
     state.fileHash = null;
     state.keyReady = null;  // 重置密钥就绪信号，防止旧 Promise 污染下次传输
     state.reconnectAttempts = 0;
+    state._pendingMessages = [];  // 清空消息队列
   }
 
   function init() {
@@ -372,11 +391,16 @@ const App = (() => {
             }).catch(err => {
               console.error('[KEY] 密钥导入失败:', err);
               UI?.showToast?.('解密密钥无效，请检查链接', 'error');
+              // 抛出错误以阻止后续的 joinRoom
+              throw err;
             })
           : Promise.resolve();
         // 等待密钥就绪后再自动加入房间
         keyPromise.then(() => {
           UI?.onHashDetected(roomId);
+        }).catch(() => {
+          // 密钥导入失败，不自动加入房间
+          console.warn('[INIT] 密钥无效，跳过自动加入房间');
         });
       }
     }

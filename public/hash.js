@@ -23,14 +23,10 @@ const HashModule = (() => {
    * @returns {Promise<string>} 8 位十六进制指纹
    */
   async function computeFingerprint(file, onProgress) {
-    const CHUNK_SIZE = 2 * 1024 * 1024; // 2MB 分片
-    const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
-
-    // 使用 SubtleCrypto 的 digest 逐片更新
-    // 注意：Web Crypto API 不支持流式 digest，需用 hash 对象
-    // 但 SubtleCrypto 没有流式接口，这里用 FileReader 分片 + 拼接
-    // 对于超大文件（>500MB），建议只取头尾各 1MB 做采样哈希
-    if (file.size > 500 * 1024 * 1024) {
+    // 对于大文件（>100MB），使用采样哈希避免 OOM
+    // 移动端 Safari tab 内存限制通常为 512MB~1GB
+    // 全量 arrayBuffer + SHA-256 计算需要约 2x 文件大小的临时内存
+    if (file.size > 100 * 1024 * 1024) {
       return await _sampleHash(file);
     }
 
